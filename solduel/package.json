@@ -1,13 +1,14 @@
 {
   "name": "solduel",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "SolDuel Gaming Platform",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "cd app && npm run dev",
+    "build": "cd app && npm run build",
+    "start": "cd app && npm run start",
+    "install": "cd app && npm install"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
-  "packageManager": "pnpm@10.15.0"
+  "license": "ISC"
 }
