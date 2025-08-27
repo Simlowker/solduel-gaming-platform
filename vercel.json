@@ -1,6 +1,6 @@
 {
-  "buildCommand": "cd solduel && npm run build",
+  "buildCommand": "cd solduel && pnpm run build",
   "outputDirectory": "solduel/.next",
-  "installCommand": "cd solduel && npm install",
+  "installCommand": "cd solduel && pnpm install --no-frozen-lockfile",
   "framework": "nextjs"
 }
