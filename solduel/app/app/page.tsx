@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Coins, Scissors, Dice6, Users, Zap, Shield, TrendingUp } from "lucide-react"
 import Link from "next/link"
+import { InitializeConfigButton } from "@/components/initialize-config-button"
 
 export default function HomePage() {
   const games = [
@@ -91,6 +92,7 @@ export default function HomePage() {
           <Button variant="outline" size="lg">
             Watch Demo
           </Button>
+          <InitializeConfigButton />
         </div>
 
         <div className="flex justify-center gap-8 pt-8">

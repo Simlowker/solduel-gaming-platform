@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useConnection, useWallet } from '@solana/wallet-adapter-react'
-import SolDuelSDK, { StrategicAction, DuelState } from "@/lib/solduel-sdk"
+import SolDuelSDK, { StrategicAction, DuelState, GameState, GameType } from "@/lib/solduel-sdk"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -139,34 +139,44 @@ export function SolDuelGame() {
     return () => clearInterval(interval)
   }, [sdk, currentDuelId])
 
-  const [openDuels] = useState([
-    {
-      roomId: "room_001",
-      player1: {
-        id: "whale_001",
-        displayName: "SolWhale",
-        wallet: "9xKX...7mNp",
-        avatar: "/whale-avatar.png",
-        stake: 5.0,
-        winRate: 74,
-        recentForm: [true, true, true, false, true],
-      },
-      createdAt: new Date(Date.now() - 300000),
-    },
-    {
-      roomId: "room_002",
-      player1: {
-        id: "lucky_001",
-        displayName: "LuckyDice",
-        wallet: "3xKX...2mNp",
-        avatar: "/lucky-avatar.png",
-        stake: 1.5,
-        winRate: 62,
-        recentForm: [false, true, true, true, false],
-      },
-      createdAt: new Date(Date.now() - 120000),
-    },
-  ])
+  const [openDuels, setOpenDuels] = useState<any[]>([])
+  const [loadingDuels, setLoadingDuels] = useState(false)
+  
+  // Fetch active games from blockchain
+  useEffect(() => {
+    const fetchOpenDuels = async () => {
+      if (!sdk) return
+      
+      setLoadingDuels(true)
+      try {
+        const games = await sdk.getActiveGames()
+        const waitingGames = games
+          .filter(g => g.state === GameState.Waiting && g.gameType === GameType.MultiRound)
+          .map(g => ({
+            roomId: g.gameId,
+            player1: {
+              id: g.creator.toString(),
+              displayName: g.creator.toString().slice(0, 4) + '...' + g.creator.toString().slice(-4),
+              wallet: g.creator.toString().slice(0, 4) + '...' + g.creator.toString().slice(-4),
+              stake: g.stakes[0],
+              winRate: 0, // Real stats would come from PlayerAccount
+              recentForm: [],
+            },
+            createdAt: g.startTime,
+          }))
+        setOpenDuels(waitingGames)
+      } catch (error) {
+        console.error('Error fetching open duels:', error)
+      } finally {
+        setLoadingDuels(false)
+      }
+    }
+
+    fetchOpenDuels()
+    // Refresh every 5 seconds
+    const interval = setInterval(fetchOpenDuels, 5000)
+    return () => clearInterval(interval)
+  }, [sdk])
 
   const handleCreateDuel = async (stake: number) => {
     if (stake <= 0 || !sdk || !wallet.publicKey) return
@@ -213,50 +223,70 @@ export function SolDuelGame() {
     }
   }
 
-  const handleJoinExistingDuel = (duel: any, stake: number) => {
+  const handleJoinExistingDuel = async (duel: any, stake: number) => {
     const requiredStake = duel.player1.stake
     if (stake !== requiredStake) {
       alert(`You must stake exactly ${requiredStake} SOL to join this duel`)
       return
     }
 
-    const probabilities = calculateProbabilities(duel.player1.stake, stake)
+    if (!sdk || !wallet.publicKey) {
+      alert('Please connect your wallet first')
+      return
+    }
 
-    setGameRoom({
-      roomId: duel.roomId,
-      status: "ready",
-      player1: {
-        ...duel.player1,
-        initialStake: duel.player1.stake,
-        currentContribution: duel.player1.stake,
-        winProbability: probabilities.player1,
-        multiplier: probabilities.multiplier1,
-        hasFolded: false,
-      },
-      player2: {
-        id: "you",
-        wallet: "You",
-        displayName: "You",
-        initialStake: stake,
-        currentContribution: stake,
-        winProbability: probabilities.player2,
-        multiplier: probabilities.multiplier2,
-        winRate: 72,
-        totalEarnings: 23.4,
-        recentForm: [true, false, true, true, false],
-        isReady: true,
-        joinedAt: new Date(),
-        hasFolded: false,
-      },
-      totalPool: duel.player1.stake + stake,
-      createdAt: duel.createdAt,
-      currentRound: 1,
-      rounds: [],
-      maxRounds: 3,
-      currentPlayerTurn: "player1",
-      lastRaiseAmount: 0,
-    })
-    setGameState("duel")
+    setIsLoading(true)
+    try {
+      // Join the game on blockchain
+      const tx = await sdk.joinGame(duel.roomId)
+      console.log('Joined game:', tx)
+      
+      // Set the current duel ID to start polling
+      setCurrentDuelId(duel.roomId)
+      
+      const probabilities = calculateProbabilities(duel.player1.stake, stake)
+
+      setGameRoom({
+        roomId: duel.roomId,
+        status: "ready",
+        player1: {
+          ...duel.player1,
+          initialStake: duel.player1.stake,
+          currentContribution: duel.player1.stake,
+          winProbability: probabilities.player1,
+          multiplier: probabilities.multiplier1,
+          hasFolded: false,
+        },
+        player2: {
+          id: wallet.publicKey.toString(),
+          wallet: wallet.publicKey.toString().slice(0, 4) + '...' + wallet.publicKey.toString().slice(-4),
+          displayName: "You",
+          initialStake: stake,
+          currentContribution: stake,
+          winProbability: probabilities.player2,
+          multiplier: probabilities.multiplier2,
+          winRate: 0,
+          totalEarnings: 0,
+          recentForm: [],
+          isReady: true,
+          joinedAt: new Date(),
+          hasFolded: false,
+        },
+        totalPool: duel.player1.stake + stake,
+        createdAt: duel.createdAt,
+        currentRound: 1,
+        rounds: [],
+        maxRounds: 3,
+        currentPlayerTurn: "player1",
+        lastRaiseAmount: 0,
+      })
+      setGameState("duel")
+    } catch (error) {
+      console.error('Error joining duel:', error)
+      alert('Failed to join duel. Please try again.')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const calculateProbabilities = (contribution1: number, contribution2: number) => {
@@ -445,11 +475,14 @@ export function SolDuelGame() {
 
           <p className="text-muted-foreground text-lg">3-Round Betting Duels • Proportional Wins • Winner Takes All</p>
 
+          {loadingDuels ? (
+            <div className="text-center text-muted-foreground">Loading blockchain data...</div>
+          ) : (
           <div className="flex justify-center gap-8">
             <div className="text-center">
               <div className="font-orbitron font-bold text-xl text-primary flex items-center gap-1">
                 <Flame className="h-5 w-5" />
-                {openDuels.reduce((sum, duel) => sum + duel.player1.stake, 0)} SOL
+                {openDuels.reduce((sum, duel) => sum + duel.player1.stake, 0).toFixed(1)} SOL
               </div>
               <div className="text-sm text-muted-foreground">Available Pool</div>
             </div>
@@ -458,10 +491,11 @@ export function SolDuelGame() {
               <div className="text-sm text-muted-foreground">Open Duels</div>
             </div>
             <div className="text-center">
-              <div className="font-orbitron font-bold text-xl text-accent">1,247 SOL</div>
+              <div className="font-orbitron font-bold text-xl text-accent">0 SOL</div>
               <div className="text-sm text-muted-foreground">24h Volume</div>
             </div>
           </div>
+          )}
         </motion.div>
 
         <div className="grid lg:grid-cols-2 gap-6">
@@ -521,6 +555,16 @@ export function SolDuelGame() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4 max-h-96 overflow-y-auto">
+                {loadingDuels && (
+                  <div className="text-center py-8 text-muted-foreground">
+                    Loading active duels from blockchain...
+                  </div>
+                )}
+                {!loadingDuels && openDuels.length === 0 && (
+                  <div className="text-center py-8 text-muted-foreground">
+                    No open duels available. Create one to start playing!
+                  </div>
+                )}
                 {openDuels.map((duel, index) => (
                   <motion.div
                     key={duel.roomId}

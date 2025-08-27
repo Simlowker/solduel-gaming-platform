@@ -39,7 +39,7 @@ solduel/
 
 ## Deployed Program (Devnet)
 
-- **universal-game**: `UniGm1NQKYRjd1tg3c1quAKeuSv3PgJrBDVManh2Tid`
+- **universal-game**: `BELsmsp7jdUSUJDfcsLXP8HSdJsaAtbSBSJ95gRUbTyg`
 
 ## Smart Contract Architecture
 

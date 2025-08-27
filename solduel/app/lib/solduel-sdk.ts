@@ -4,7 +4,7 @@ import * as anchor from '@coral-xyz/anchor';
 import UniversalGameIDL from '../idl/universal_game.json';
 import * as crypto from 'crypto';
 
-// Program ID for the universal game contract
+// Program ID for the universal game contract (deployed on devnet)
 const UNIVERSAL_GAME_PROGRAM_ID = new PublicKey(
   process.env.NEXT_PUBLIC_PROGRAM_ID || 'BELsmsp7jdUSUJDfcsLXP8HSdJsaAtbSBSJ95gRUbTyg'
 );
@@ -41,6 +41,23 @@ export enum BetAction {
   Call = 'Call',
   Raise = 'Raise',
   Fold = 'Fold'
+}
+
+// Strategic Actions for multi-round duels
+export enum StrategicAction {
+  Check = 'Check',
+  Call = 'Call',
+  Raise = 'Raise',
+  Fold = 'Fold'
+}
+
+// Duel State for strategic games
+export enum DuelState {
+  WaitingForPlayer2 = 'WaitingForPlayer2',
+  InProgress = 'InProgress',
+  Resolving = 'Resolving',
+  Completed = 'Completed',
+  Cancelled = 'Cancelled'
 }
 
 // Game interface
@@ -260,6 +277,52 @@ export class SolDuelSDK {
       .rpc();
     
     return tx;
+  }
+
+  // ===== STRATEGIC DUEL FUNCTIONS =====
+  
+  async createStrategicDuel(stakeAmount: number): Promise<{ duelId: string; tx: string }> {
+    // Create a multi-round game for strategic duels
+    return this.createGame(GameType.MultiRound, stakeAmount, 2);
+  }
+
+  async getDuelState(duelId: string): Promise<any> {
+    const game = await this.getGame(duelId);
+    if (!game) return null;
+    
+    // Map game state to duel state
+    let state = DuelState.Cancelled;
+    if (game.state === GameState.Waiting) {
+      state = DuelState.WaitingForPlayer2;
+    } else if (game.state === GameState.Active) {
+      state = DuelState.InProgress;
+    } else if (game.state === GameState.Resolving) {
+      state = DuelState.Resolving;
+    } else if (game.state === GameState.Completed) {
+      state = DuelState.Completed;
+    }
+    
+    return {
+      duelId: game.gameId,
+      state,
+      players: game.players,
+      stakes: game.stakes,
+      potTotal: game.potTotal,
+      currentRound: game.currentRound,
+      winner: game.winner,
+      startTime: game.startTime,
+      endTime: game.endTime
+    };
+  }
+
+  async submitAction(
+    duelId: string, 
+    action: StrategicAction, 
+    raiseAmount?: number
+  ): Promise<string> {
+    // Map strategic action to bet action
+    const betAction = action as unknown as BetAction;
+    return this.placeBet(duelId, betAction, raiseAmount);
   }
 
   // ===== MULTI-ROUND FUNCTIONS =====
