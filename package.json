@@ -7,8 +7,5 @@
 		"build": "cd solduel && pnpm build",
 		"start": "cd solduel && pnpm start",
 		"lint": "cd solduel && pnpm lint"
-	},
-	"dependencies": {
-		"@solana/wallet-adapter-react-ui": "0.9.35"
 	}
 }
