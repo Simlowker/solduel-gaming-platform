@@ -157,7 +157,7 @@ impl VrfManager {
     
     /// Select lottery winner using VRF result
     pub fn select_lottery_winner(
-        game: &Account<GameAccountOptimized>,
+        game: &GameAccountOptimized,
         randomness: u64,
     ) -> Result<(usize, Pubkey)> {
         let total_tickets = game.stakes.iter()
@@ -196,7 +196,7 @@ impl VrfManager {
     
     /// Generate deterministic randomness for simple games (fallback)
     pub fn generate_simple_randomness(
-        game: &Account<GameAccountOptimized>,
+        game: &GameAccountOptimized,
         recent_blockhash: &[u8; 32],
     ) -> u64 {
         use anchor_lang::solana_program::keccak;

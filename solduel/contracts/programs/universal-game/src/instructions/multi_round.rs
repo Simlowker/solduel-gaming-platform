@@ -4,7 +4,7 @@ use crate::state::{GameAccountOptimized, GameType, GameState, BetAction};
 use crate::errors::GameError;
 
 pub fn place_bet(ctx: Context<PlaceBet>, action: BetAction) -> Result<()> {
-    let game = &mut ctx.accounts.game;
+    let mut game = ctx.accounts.game.load_mut()?;
     let clock = Clock::get()?;
     
     // Validate game state
@@ -36,7 +36,7 @@ pub fn place_bet(ctx: Context<PlaceBet>, action: BetAction) -> Result<()> {
         },
         BetAction::Call => {
             // Match the current bet
-            let current_bet = calculate_current_bet(game)?;
+            let current_bet = calculate_current_bet(&*game)?;
             let player_bet = game.stakes[player_index];
             let call_amount = current_bet.saturating_sub(player_bet);
             
@@ -65,7 +65,7 @@ pub fn place_bet(ctx: Context<PlaceBet>, action: BetAction) -> Result<()> {
         },
         BetAction::Raise(amount) => {
             // Raise the bet
-            let current_bet = calculate_current_bet(game)?;
+            let current_bet = calculate_current_bet(&*game)?;
             require!(amount > current_bet, GameError::InvalidBetAction);
             
             let raise_amount = amount - game.stakes[player_index];
@@ -99,7 +99,8 @@ pub fn place_bet(ctx: Context<PlaceBet>, action: BetAction) -> Result<()> {
             
             // Other player wins
             let winner_index = if player_index == 0 { 1 } else { 0 };
-            game.winner = Some(game.players[winner_index]);
+            game.winner = game.players[winner_index];
+            game.has_winner = 1;
             let game_type = game.game_type();
             game.set_type_and_state(game_type, GameState::Completed);
             let current_time = clock.unix_timestamp as u32;
@@ -118,7 +119,7 @@ pub fn place_bet(ctx: Context<PlaceBet>, action: BetAction) -> Result<()> {
     game.set_timestamps(start_time, current_time);
     
     // Check if round is complete
-    if should_advance_round(game) {
+    if should_advance_round(&*game) {
         let current_round = game.current_round();
         let max_rounds = game.max_rounds();
         game.set_rounds(current_round + 1, max_rounds);
@@ -150,7 +151,7 @@ fn should_advance_round(game: &GameAccountOptimized) -> bool {
 #[derive(Accounts)]
 pub struct PlaceBet<'info> {
     #[account(mut)]
-    pub game: Account<'info, GameAccountOptimized>,
+    pub game: AccountLoader<'info, GameAccountOptimized>,
     
     /// CHECK: Vault account for holding stakes
     #[account(mut)]

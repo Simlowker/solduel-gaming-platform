@@ -6,7 +6,8 @@ use crate::errors::TreasuryError;
 
 /// Treasury fee collection and distribution logic
 pub fn collect_platform_fee<'info>(
-    game: &mut Account<'info, GameAccountOptimized>,
+    game: &mut GameAccountOptimized,
+    game_account_info: &AccountInfo<'info>,
     config: &Account<'info, ConfigurationAccount>,
     treasury: &AccountInfo<'info>,
     system_program: &Program<'info, System>,
@@ -30,7 +31,7 @@ pub fn collect_platform_fee<'info>(
         let cpi_context = CpiContext::new(
             system_program.to_account_info(),
             system_program::Transfer {
-                from: game.to_account_info(),
+                from: game_account_info.clone(),
                 to: treasury.clone(),
             },
         );
@@ -65,7 +66,8 @@ pub fn calculate_winner_payout(
 
 /// Distribute winnings with automatic fee collection
 pub fn distribute_winnings_with_fees<'info>(
-    game: &mut Account<'info, GameAccountOptimized>,
+    game: &mut GameAccountOptimized,
+    game_account_info: &AccountInfo<'info>,
     config: &Account<'info, ConfigurationAccount>,
     winner: &AccountInfo<'info>,
     treasury: &AccountInfo<'info>,
@@ -79,13 +81,13 @@ pub fn distribute_winnings_with_fees<'info>(
     
     // Ensure winner is set
     require!(
-        game.winner.is_some(),
+        game.has_winner == 1,
         TreasuryError::NoWinnerSet
     );
     
     // Verify winner account
     require!(
-        game.winner.unwrap() == winner.key(),
+        game.winner == winner.key(),
         TreasuryError::InvalidWinner
     );
     
@@ -100,7 +102,7 @@ pub fn distribute_winnings_with_fees<'info>(
         let treasury_transfer = CpiContext::new(
             system_program.to_account_info(),
             system_program::Transfer {
-                from: game.to_account_info(),
+                from: game_account_info.clone(),
                 to: treasury.clone(),
             },
         );
@@ -122,7 +124,7 @@ pub fn distribute_winnings_with_fees<'info>(
         let winner_transfer = CpiContext::new(
             system_program.to_account_info(),
             system_program::Transfer {
-                from: game.to_account_info(),
+                from: game_account_info.clone(),
                 to: winner.clone(),
             },
         );
@@ -138,7 +140,8 @@ pub fn distribute_winnings_with_fees<'info>(
 
 /// Refund players with fee deduction for cancelled games
 pub fn refund_with_penalty<'info>(
-    game: &mut Account<'info, GameAccountOptimized>,
+    game: &mut GameAccountOptimized,
+    game_account_info: &AccountInfo<'info>,
     config: &Account<'info, ConfigurationAccount>,
     player: &AccountInfo<'info>,
     treasury: &AccountInfo<'info>,
@@ -166,7 +169,7 @@ pub fn refund_with_penalty<'info>(
             let penalty_transfer = CpiContext::new(
                 system_program.to_account_info(),
                 system_program::Transfer {
-                    from: game.to_account_info(),
+                    from: game_account_info.clone(),
                     to: treasury.clone(),
                 },
             );
@@ -191,7 +194,7 @@ pub fn refund_with_penalty<'info>(
         let refund_transfer = CpiContext::new(
             system_program.to_account_info(),
             system_program::Transfer {
-                from: game.to_account_info(),
+                from: game_account_info.clone(),
                 to: player.clone(),
             },
         );
@@ -209,7 +212,7 @@ pub fn refund_with_penalty<'info>(
 pub fn batch_refund_all_players<'info>(
     ctx: Context<BatchRefund<'info>>,
 ) -> Result<()> {
-    let game = &mut ctx.accounts.game;
+    let mut game = ctx.accounts.game.load_mut()?;
     
     // Ensure game is cancelled
     require!(
@@ -224,7 +227,7 @@ pub fn batch_refund_all_players<'info>(
             let refund_amount = game.stakes[i];
             
             // Direct lamports transfer from game PDA
-            **game.to_account_info().try_borrow_mut_lamports()? -= refund_amount;
+            **ctx.accounts.game.to_account_info().try_borrow_mut_lamports()? -= refund_amount;
             **ctx.remaining_accounts[i].try_borrow_mut_lamports()? += refund_amount;
             
             // Clear stake
@@ -241,7 +244,7 @@ pub fn batch_refund_all_players<'info>(
 #[derive(Accounts)]
 pub struct BatchRefund<'info> {
     #[account(mut)]
-    pub game: Account<'info, GameAccountOptimized>,
+    pub game: AccountLoader<'info, GameAccountOptimized>,
     pub config: Account<'info, ConfigurationAccount>,
     pub system_program: Program<'info, System>,
     // remaining_accounts contains all players to refund

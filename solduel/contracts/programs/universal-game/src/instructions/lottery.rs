@@ -1,12 +1,11 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 use crate::state::{ConfigurationAccount, GameAccountOptimized, GameType, GameState};
-use crate::state::game_optimized::{FLAG_IS_RESOLVED, FLAG_FEES_DISTRIBUTED};
 use crate::constants::*;
 use crate::errors::GameError;
 
 pub fn enter_lottery(ctx: Context<EnterLottery>, num_tickets: u32) -> Result<()> {
-    let game = &mut ctx.accounts.game;
+    let mut game = ctx.accounts.game.load_mut()?;
     let clock = Clock::get()?;
     
     // Validate game state
@@ -73,7 +72,7 @@ pub fn enter_lottery(ctx: Context<EnterLottery>, num_tickets: u32) -> Result<()>
 }
 
 pub fn draw_lottery(ctx: Context<DrawLottery>) -> Result<()> {
-    let game = &mut ctx.accounts.game;
+    let mut game = ctx.accounts.game.load_mut()?;
     let clock = Clock::get()?;
     
     // Validate lottery is ready for drawing
@@ -105,7 +104,8 @@ pub fn draw_lottery(ctx: Context<DrawLottery>) -> Result<()> {
     let winner_index = (random_seed % game.player_count as u64) as usize;
     
     // Set winner
-    game.winner = Some(game.players[winner_index]);
+    game.winner = game.players[winner_index];
+    game.has_winner = 1;
     let game_type = game.game_type();
     game.set_type_and_state(game_type, GameState::Completed);
     let current_time = clock.unix_timestamp as u32;
@@ -116,7 +116,7 @@ pub fn draw_lottery(ctx: Context<DrawLottery>) -> Result<()> {
 }
 
 pub fn claim_winnings(ctx: Context<ClaimWinnings>) -> Result<()> {
-    let game = &ctx.accounts.game;
+    let game = ctx.accounts.game.load()?;
     let config = &ctx.accounts.config;
     
     // Game must be completed
@@ -127,7 +127,7 @@ pub fn claim_winnings(ctx: Context<ClaimWinnings>) -> Result<()> {
     
     // Player must be the winner
     require!(
-        Some(ctx.accounts.player.key()) == game.winner,
+        game.has_winner == 1 && ctx.accounts.player.key() == game.winner,
         GameError::UnauthorizedPlayer
     );
     
@@ -156,7 +156,7 @@ pub fn claim_winnings(ctx: Context<ClaimWinnings>) -> Result<()> {
 }
 
 pub fn resolve_game(ctx: Context<ResolveGame>) -> Result<()> {
-    let game = &mut ctx.accounts.game;
+    let mut game = ctx.accounts.game.load_mut()?;
     let clock = Clock::get()?;
     
     // Must be in resolving state
@@ -170,7 +170,8 @@ pub fn resolve_game(ctx: Context<ResolveGame>) -> Result<()> {
         // Simple random selection for now
         let random_seed = clock.unix_timestamp as u64;
         let winner_index = (random_seed % game.player_count as u64) as usize;
-        game.winner = Some(game.players[winner_index]);
+        game.winner = game.players[winner_index];
+        game.has_winner = 1;
     }
     
     let game_type = game.game_type();
@@ -185,7 +186,7 @@ pub fn resolve_game(ctx: Context<ResolveGame>) -> Result<()> {
 #[derive(Accounts)]
 pub struct EnterLottery<'info> {
     #[account(mut)]
-    pub game: Account<'info, GameAccountOptimized>,
+    pub game: AccountLoader<'info, GameAccountOptimized>,
     
     /// CHECK: Vault account for holding stakes
     #[account(mut)]
@@ -200,7 +201,7 @@ pub struct EnterLottery<'info> {
 #[derive(Accounts)]
 pub struct DrawLottery<'info> {
     #[account(mut)]
-    pub game: Account<'info, GameAccountOptimized>,
+    pub game: AccountLoader<'info, GameAccountOptimized>,
     
     pub player: Signer<'info>,
 }
@@ -208,7 +209,7 @@ pub struct DrawLottery<'info> {
 #[derive(Accounts)]
 pub struct ClaimWinnings<'info> {
     #[account(mut)]
-    pub game: Account<'info, GameAccountOptimized>,
+    pub game: AccountLoader<'info, GameAccountOptimized>,
     
     #[account(seeds = [b"config"], bump)]
     pub config: Account<'info, ConfigurationAccount>,
@@ -228,7 +229,7 @@ pub struct ClaimWinnings<'info> {
 #[derive(Accounts)]
 pub struct ResolveGame<'info> {
     #[account(mut)]
-    pub game: Account<'info, GameAccountOptimized>,
+    pub game: AccountLoader<'info, GameAccountOptimized>,
     
     pub player: Signer<'info>,
 }

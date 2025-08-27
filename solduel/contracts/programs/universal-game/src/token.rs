@@ -27,7 +27,7 @@ pub fn create_token_game<'info>(
     game_type: crate::state::GameType,
     stake_amount: u64,
 ) -> Result<()> {
-    let game = &mut ctx.accounts.game;
+    let mut game = ctx.accounts.game.load_init()?;
     let token_config = &ctx.accounts.token_config;
     
     // Validate stake amount
@@ -62,7 +62,7 @@ pub fn create_token_game<'info>(
 pub fn join_token_game<'info>(
     ctx: Context<JoinTokenGame<'info>>,
 ) -> Result<()> {
-    let game = &mut ctx.accounts.game;
+    let mut game = ctx.accounts.game.load_mut()?;
     
     // Validate player can join
     require!(
@@ -96,21 +96,35 @@ pub fn distribute_token_winnings<'info>(
     let config = &ctx.accounts.config;
     
     // Get game values before mutable borrow
-    let pot_total = ctx.accounts.game.pot_total;
-    let game_creator = ctx.accounts.game.creator;
-    let game_id = ctx.accounts.game.game_id;
-    let game_bump = ctx.bumps.game;
+    let game = ctx.accounts.game.load()?;
+    let pot_total = game.pot_total;
+    let game_creator = game.creator;
+    let game_id = game.game_id;
+    drop(game); // Release immutable borrow
+    
+    // Derive the bump for the game PDA
+    let (_, game_bump) = Pubkey::find_program_address(
+        &[
+            b"game",
+            game_creator.as_ref(),
+            &game_id.to_le_bytes(),
+        ],
+        ctx.program_id,
+    );
     
     // Calculate fees and winner payout
     let platform_fee = (pot_total * config.platform_fee as u64) / 100;
     let winner_payout = pot_total - platform_fee;
+    
+    // Get game account info for PDA signing
+    let game_account_info = ctx.accounts.game.to_account_info();
     
     // Transfer platform fee to treasury
     if platform_fee > 0 {
         transfer_tokens_from_vault(
             &ctx.accounts.game_vault,
             &ctx.accounts.treasury_token_account,
-            &ctx.accounts.game.to_account_info(),
+            &game_account_info,
             &ctx.accounts.token_program,
             platform_fee,
             &[&[
@@ -127,7 +141,7 @@ pub fn distribute_token_winnings<'info>(
         transfer_tokens_from_vault(
             &ctx.accounts.game_vault,
             &ctx.accounts.winner_token_account,
-            &ctx.accounts.game.to_account_info(),
+            &game_account_info,
             &ctx.accounts.token_program,
             winner_payout,
             &[&[
@@ -140,7 +154,7 @@ pub fn distribute_token_winnings<'info>(
     }
     
     // Mark as distributed (now get mutable reference)
-    let game = &mut ctx.accounts.game;
+    let mut game = ctx.accounts.game.load_mut()?;
     game.set_flag(crate::state::game_optimized::FLAG_FEES_DISTRIBUTED, true);
     
     Ok(())
@@ -204,7 +218,7 @@ pub struct CreateTokenGame<'info> {
         seeds = [b"game", creator.key().as_ref(), &config.game_counter.to_le_bytes()],
         bump
     )]
-    pub game: Account<'info, GameAccountOptimized>,
+    pub game: AccountLoader<'info, GameAccountOptimized>,
     
     #[account(mut)]
     pub config: Account<'info, crate::state::ConfigurationAccount>,
@@ -240,11 +254,9 @@ pub struct JoinTokenGame<'info> {
     pub player: Signer<'info>,
     
     #[account(
-        mut,
-        seeds = [b"game", game.creator.as_ref(), &game.game_id.to_le_bytes()],
-        bump
+        mut
     )]
-    pub game: Account<'info, GameAccountOptimized>,
+    pub game: AccountLoader<'info, GameAccountOptimized>,
     
     pub token_mint: Account<'info, Mint>,
     
@@ -273,11 +285,9 @@ pub struct DistributeTokenWinnings<'info> {
     pub authority: Signer<'info>,
     
     #[account(
-        mut,
-        seeds = [b"game", game.creator.as_ref(), &game.game_id.to_le_bytes()],
-        bump
+        mut
     )]
-    pub game: Account<'info, GameAccountOptimized>,
+    pub game: AccountLoader<'info, GameAccountOptimized>,
     
     pub config: Account<'info, crate::state::ConfigurationAccount>,
     

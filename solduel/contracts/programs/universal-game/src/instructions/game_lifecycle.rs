@@ -1,7 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
-use crate::state::{ConfigurationAccount, PlayerAccount, GameAccountOptimized, GameType, GameState};
-use crate::state::game_optimized::*;
+use crate::state::{ConfigurationAccount, GameAccountOptimized, GameType, GameState};
 use crate::constants::*;
 use crate::errors::GameError;
 use crate::events::*;
@@ -13,7 +12,7 @@ pub fn create_game(
     max_players: Option<u8>,
 ) -> Result<()> {
     let config = &ctx.accounts.config;
-    let game = &mut ctx.accounts.game;
+    let mut game = ctx.accounts.game.load_init()?;
     let clock = Clock::get()?;
     
     // Validate stake amount
@@ -43,7 +42,8 @@ pub fn create_game(
     
     // Initialize other fields
     game.action_count = 0;
-    game.winner = None;
+    game.winner = Pubkey::default();
+    game.has_winner = 0;
     game.vrf_result = [0u8; 32];
     game.set_timestamps(clock.unix_timestamp as u32, clock.unix_timestamp as u32);
     game.entry_fee = stake_amount;
@@ -87,7 +87,7 @@ pub fn create_game(
 }
 
 pub fn join_game(ctx: Context<JoinGame>) -> Result<()> {
-    let game = &mut ctx.accounts.game;
+    let mut game = ctx.accounts.game.load_mut()?;
     let clock = Clock::get()?;
     
     // Check game state
@@ -165,7 +165,7 @@ pub fn join_game(ctx: Context<JoinGame>) -> Result<()> {
 }
 
 pub fn cancel_game(ctx: Context<CancelGame>) -> Result<()> {
-    let game = &mut ctx.accounts.game;
+    let mut game = ctx.accounts.game.load_mut()?;
     let clock = Clock::get()?;
     
     // Only creator can cancel waiting games
@@ -199,7 +199,7 @@ pub fn cancel_game(ctx: Context<CancelGame>) -> Result<()> {
 }
 
 pub fn force_finish(ctx: Context<ForceFinish>) -> Result<()> {
-    let game = &mut ctx.accounts.game;
+    let mut game = ctx.accounts.game.load_mut()?;
     let config = &ctx.accounts.config;
     let clock = Clock::get()?;
     
@@ -243,7 +243,7 @@ pub struct CreateGame<'info> {
         ],
         bump
     )]
-    pub game: Account<'info, GameAccountOptimized>,
+    pub game: AccountLoader<'info, GameAccountOptimized>,
     
     #[account(
         mut,
@@ -272,7 +272,7 @@ pub struct CreateGame<'info> {
 #[derive(Accounts)]
 pub struct JoinGame<'info> {
     #[account(mut)]
-    pub game: Account<'info, GameAccountOptimized>,
+    pub game: AccountLoader<'info, GameAccountOptimized>,
     
     /// CHECK: Vault account for holding stakes
     #[account(mut)]
@@ -287,7 +287,7 @@ pub struct JoinGame<'info> {
 #[derive(Accounts)]
 pub struct CancelGame<'info> {
     #[account(mut)]
-    pub game: Account<'info, GameAccountOptimized>,
+    pub game: AccountLoader<'info, GameAccountOptimized>,
     
     pub player: Signer<'info>,
 }
@@ -295,7 +295,7 @@ pub struct CancelGame<'info> {
 #[derive(Accounts)]
 pub struct ForceFinish<'info> {
     #[account(mut)]
-    pub game: Account<'info, GameAccountOptimized>,
+    pub game: AccountLoader<'info, GameAccountOptimized>,
     
     #[account(seeds = [CONFIG_SEED], bump)]
     pub config: Account<'info, ConfigurationAccount>,

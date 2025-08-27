@@ -6,15 +6,36 @@ This file provides guidance to Claude (claude.ai) when working with this reposit
 
 SolDuel - Universal decentralized gaming platform on Solana supporting multiple PvP game modes with verifiable fairness, optimized for minimal rent costs and maximum security.
 
-## Recent Optimizations (Production-Ready)
+## Vision & Mission
+
+### Vision
+- Make on-chain gaming mainstream with a fast, affordable, and delightful UX.
+- Become the reference for duels and chance-based games on Solana with full transparency.
+- Offer a universal, modular gaming protocol that the community can extend.
+
+### Mission
+- Provide instant duels and lotteries with deposits, pots, and withdrawals in a few clicks.
+- Guarantee fairness through smart contracts, commit–reveal, and verifiable randomness (VRF).
+- Ship a clear, ergonomic SDK so builders can add new game modes on the same program.
+- Reward the ecosystem (players, creators) via leaderboards, seasons, and fee sharing.
+- Ensure security and compliance (escrow, limits, timeouts, anti‑bot).
+
+## Recent Optimizations (Production-Ready) - Updated 2025-08-27
 
 ### ✅ Completed Improvements
-1. **Account Size Optimization**: Reduced from ~11KB to ~8KB (27% reduction)
+1. **Account Size Optimization**: Reduced from ~11KB to ~7.5KB (32% reduction)
    - Fixed arrays instead of Vec for better rent efficiency
    - Bit-packed game state and type into single byte
    - Packed timestamps into single u64
+   - **Zero-copy accounts** implemented to prevent BPF stack overflow
    
-2. **Verifiable Random Function (VRF)**: Switchboard integration for true fairness
+2. **BPF Stack Overflow Resolution** (Critical Fix)
+   - Converted `GameAccountOptimized` to zero-copy using `#[account(zero_copy(unsafe))]`
+   - Changed all `Account<'info, GameAccountOptimized>` to `AccountLoader<'info, GameAccountOptimized>`
+   - Updated all instructions to use `load_init()` and `load_mut()` methods
+   - Fixed account size calculation with proper padding (7552 bytes total)
+   
+3. **Verifiable Random Function (VRF)**: Switchboard integration for true fairness
    - Full VRF and VRF Lite support
    - Verifiable lottery winner selection
    - Fallback deterministic randomness
@@ -72,7 +93,7 @@ solduel/                     # Root = Next.js app (for easy Vercel deployment)
 
 ## Deployed Program (Devnet)
 
-- **universal-game**: `Cg8sF2yCkfStCqCViq676zXzRBqr7XRmyJtvLweNAh9x` (Updated: 2025-08-27)
+- **universal-game**: `38Xnf1RasJFZ5Xs6Tbyk3tMJw7ZkXXLLmuaV8hRxJvmD` (Updated: 2025-08-27 - Zero-copy implementation)
 
 ## Smart Contract Architecture
 
@@ -97,7 +118,7 @@ Global settings managed by admin:
 - `game_counter`: u64 - Unique game ID generator
 
 #### GameAccountOptimized (PDA: seeds = ["game", creator, game_id])
-Optimized per-game state with fixed arrays:
+**Zero-copy account** (7552 bytes) with fixed arrays:
 - `game_id`: u64 - Unique identifier
 - `game_type_and_state`: u8 - Bit-packed type and state
 - `creator`: Pubkey - Game creator
@@ -109,7 +130,7 @@ Optimized per-game state with fixed arrays:
 - `commit_hashes`: [[u8; 32]; 100] - Fixed commit array
 - `reveals_packed`: [u8; 100] - Packed reveals
 - `action_history_packed`: [u8; 50] - Packed betting history
-- `winner`: Option<Pubkey> - Winner address
+- `winner`: Pubkey - Winner address (with `has_winner` flag)
 - `vrf_result`: [u8; 32] - VRF randomness result
 - `timestamps`: u64 - Packed start/last_action times
 - `platform_fee_collected`: u64 - Fee amount collected
@@ -172,6 +193,7 @@ Player statistics:
 
 ### Security & Constraints
 
+- **Zero-copy accounts** prevent BPF stack overflow (4KB limit)
 - Fixed size arrays for predictable rent costs
 - PDAs ensure unique accounts and program ownership
 - Escrow through program-owned vaults + token accounts
@@ -248,8 +270,10 @@ NEXT_PUBLIC_SWITCHBOARD_QUEUE=<VRF_QUEUE_PUBKEY>
 
 ### Testing
 - **Wallet**: Configure for devnet at ~/.config/solana/devnet-keypair.json
-- **Airdrop**: Use `solana airdrop 2 --url devnet` to get test SOL
+- **Airdrop**: Use `solana airdrop 2 --url devnet` to get test SOL (rate limited)
 - **SPL Tokens**: Create test tokens with `spl-token create-token`
+- **Test Suite**: Run `anchor test --skip-deploy` for TypeScript tests
+- **Tests Pass**: Config initialization and game creation working
 
 ### Building & Deployment
 - **IDL Generation**: After contract changes, copy IDL: `cp contracts/target/idl/universal_game.json idl/`
@@ -257,8 +281,9 @@ NEXT_PUBLIC_SWITCHBOARD_QUEUE=<VRF_QUEUE_PUBKEY>
 - **Vercel Deploy**: Push to GitHub, auto-deploys from master branch
 
 ### Performance Optimizations
-- Account size reduced by 27% through bit-packing
+- Account size reduced by 32% through bit-packing and zero-copy
 - Fixed arrays eliminate dynamic allocation overhead
+- Zero-copy accounts prevent BPF stack overflow (was using 26KB of 4KB limit)
 - Event logging replaces expensive on-chain storage
 - VRF calls batched for efficiency
 

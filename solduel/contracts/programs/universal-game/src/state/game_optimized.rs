@@ -3,7 +3,10 @@ use crate::constants::MAX_PLAYERS;
 use super::game::{GameType, GameState};
 
 /// Optimized game account with fixed arrays for better rent efficiency
-#[account]
+/// Uses zero-copy to avoid stack overflow issues
+#[account(zero_copy(unsafe))]
+#[repr(C)]
+#[derive(Debug)]
 pub struct GameAccountOptimized {
     /// Unique game identifier
     pub game_id: u64,
@@ -39,8 +42,11 @@ pub struct GameAccountOptimized {
     pub action_history_packed: [u8; 50], // Each action fits in 1 byte
     pub action_count: u8,
     
-    /// Winner of the game
-    pub winner: Option<Pubkey>,
+    /// Winner of the game (all zeros if no winner yet)
+    pub winner: Pubkey,
+    
+    /// Flag to indicate if winner is set
+    pub has_winner: u8,
     
     /// Random result for VRF
     pub vrf_result: [u8; 32],
@@ -62,7 +68,7 @@ pub struct GameAccountOptimized {
 }
 
 impl GameAccountOptimized {
-    pub const LEN: usize = 8 + // discriminator
+    pub const LEN: usize = 8 + // Anchor discriminator
         8 + // game_id
         1 + // game_type_and_state
         32 + // creator
@@ -75,13 +81,15 @@ impl GameAccountOptimized {
         MAX_PLAYERS + // reveals_packed
         50 + // action_history_packed
         1 + // action_count
-        33 + // winner (Option<Pubkey>)
+        32 + // winner
+        1 + // has_winner
         32 + // vrf_result
         8 + // timestamps
         8 + // entry_fee
         8 + // platform_fee_collected
         32 + // treasury
-        1; // flags
+        1 + // flags
+        20; // padding for alignment
     
     /// Unpack game type from packed byte
     pub fn game_type(&self) -> GameType {
@@ -167,31 +175,8 @@ impl GameAccountOptimized {
     }
 }
 
-impl Default for GameAccountOptimized {
-    fn default() -> Self {
-        Self {
-            game_id: 0,
-            game_type_and_state: 0,
-            creator: Pubkey::default(),
-            player_count: 0,
-            players: [Pubkey::default(); MAX_PLAYERS],
-            stakes: [0u64; MAX_PLAYERS],
-            pot_total: 0,
-            rounds: 0,
-            commit_hashes: [[0u8; 32]; MAX_PLAYERS],
-            reveals_packed: [0u8; MAX_PLAYERS],
-            action_history_packed: [0u8; 50],
-            action_count: 0,
-            winner: None,
-            vrf_result: [0u8; 32],
-            timestamps: 0,
-            platform_fee_collected: 0,
-            treasury: Pubkey::default(),
-            flags: 0,
-            entry_fee: 0,
-        }
-    }
-}
+// Note: Zero-copy accounts don't have Default implementation
+// Initialization happens in load_init()
 
 /// Helper constants for flag positions
 pub const FLAG_IS_RESOLVED: u8 = 0;

@@ -10,9 +10,8 @@ pub mod vrf;
 
 use instructions::*;
 use state::*;
-use events::*;
 
-declare_id!("Cg8sF2yCkfStCqCViq676zXzRBqr7XRmyJtvLweNAh9x");
+declare_id!("38Xnf1RasJFZ5Xs6Tbyk3tMJw7ZkXXLLmuaV8hRxJvmD");
 
 #[program]
 pub mod universal_game {

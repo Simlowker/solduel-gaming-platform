@@ -1,6 +1,0 @@
-{
-  "buildCommand": "cd solduel && npm run build",
-  "outputDirectory": "solduel/.next",
-  "installCommand": "cd solduel && npm install",
-  "framework": "nextjs"
-}

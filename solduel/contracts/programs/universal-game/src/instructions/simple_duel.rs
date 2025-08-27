@@ -1,12 +1,11 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::hash::hash;
 use crate::state::{GameAccountOptimized, GameType, GameState, GameMove};
-use crate::state::game_optimized::*;
 use crate::errors::GameError;
 use crate::events::*;
 
 pub fn commit_move(ctx: Context<CommitMove>, move_hash: [u8; 32]) -> Result<()> {
-    let game = &mut ctx.accounts.game;
+    let mut game = ctx.accounts.game.load_mut()?;
     let clock = Clock::get()?;
     
     // Validate game state
@@ -73,7 +72,7 @@ pub fn reveal_move(
     game_move: GameMove,
     nonce: [u8; 32],
 ) -> Result<()> {
-    let game = &mut ctx.accounts.game;
+    let mut game = ctx.accounts.game.load_mut()?;
     let clock = Clock::get()?;
     
     // Validate game state
@@ -129,7 +128,7 @@ pub fn reveal_move(
     
     if all_revealed {
         // Determine winner
-        determine_winner(game)?;
+        determine_winner(&mut *game)?;
         let game_type = game.game_type();
         game.set_type_and_state(game_type, GameState::Completed);
         let start = game.start_time();
@@ -184,7 +183,8 @@ fn determine_winner(game: &mut GameAccountOptimized) -> Result<()> {
     };
     
     if let Some(idx) = winner_index {
-        game.winner = Some(game.players[idx]);
+        game.winner = game.players[idx];
+        game.has_winner = 1;
     }
     
     Ok(())
@@ -193,7 +193,7 @@ fn determine_winner(game: &mut GameAccountOptimized) -> Result<()> {
 #[derive(Accounts)]
 pub struct CommitMove<'info> {
     #[account(mut)]
-    pub game: Account<'info, GameAccountOptimized>,
+    pub game: AccountLoader<'info, GameAccountOptimized>,
     
     pub player: Signer<'info>,
 }
@@ -201,7 +201,7 @@ pub struct CommitMove<'info> {
 #[derive(Accounts)]
 pub struct RevealMove<'info> {
     #[account(mut)]
-    pub game: Account<'info, GameAccountOptimized>,
+    pub game: AccountLoader<'info, GameAccountOptimized>,
     
     pub player: Signer<'info>,
 }
