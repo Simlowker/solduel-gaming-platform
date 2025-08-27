@@ -6,10 +6,5 @@
   "env": {
     "NEXT_PUBLIC_SOLANA_NETWORK": "devnet",
     "NEXT_PUBLIC_RPC_URL": "https://api.devnet.solana.com"
-  },
-  "functions": {
-    "app/**/*.tsx": {
-      "runtime": "nodejs22.x"
-    }
   }
 }
