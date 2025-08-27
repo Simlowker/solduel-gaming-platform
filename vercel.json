@@ -1,6 +1,11 @@
 {
   "buildCommand": "cd solduel && npm run build",
   "outputDirectory": "solduel/.next",
-  "installCommand": "cd solduel && npm install --legacy-peer-deps",
-  "framework": "nextjs"
+  "installCommand": "cd solduel && npm install",
+  "framework": "nextjs",
+  "functions": {
+    "solduel/app/**/*.{js,jsx,ts,tsx}": {
+      "runtime": "nodejs20.x"
+    }
+  }
 }
