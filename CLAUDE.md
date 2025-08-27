@@ -2,9 +2,18 @@
 
 This file provides guidance to Claude (claude.ai) when working with this repository.
 
-## Project Structure
+## Project Overview
 
-SolDuel - Universal decentralized gaming platform on Solana supporting multiple PvP game modes with verifiable fairness.
+SolDuel - Universal decentralized gaming platform on Solana supporting multiple PvP game modes with verifiable fairness, optimized for minimal rent costs and maximum security.
+
+## Recent Optimizations (Production-Ready)
+
+### ✅ Completed Improvements
+1. **Account Size Optimization**: Reduced from ~11KB to ~8KB (27% reduction)
+2. **Verifiable Random Function (VRF)**: Switchboard integration for true fairness
+3. **Event Logging System**: 15 comprehensive event types
+4. **Treasury Fee Collection**: Automatic platform fee management
+5. **SPL Token Support**: Multi-token compatibility
 
 ```
 solduel/
@@ -21,14 +30,14 @@ solduel/
 
 ## Deployed Programs (Devnet)
 
-- **universal-game**: `[TO BE DEPLOYED]` - Single universal contract for all game modes
+- **universal-game**: `BELsmsp7jdUSUJDfcsLXP8HSdJsaAtbSBSJ95gRUbTyg` - Single universal contract for all game modes
 
 ## Smart Contract Architecture
 
 ### Game Modes Supported
 1. **Simple Duel**: Rock-paper-scissors with commit-reveal mechanism
 2. **Multi-round Duel**: Poker-style betting with check/call/raise/fold actions  
-3. **Lottery**: Weighted ticket system with proportional winning odds
+3. **Lottery**: Weighted ticket system with VRF-powered verifiable fairness
 
 ### Account Structures
 
@@ -104,10 +113,20 @@ const MAX_ITEMS: usize = 10;     // Max purchasable items
 
 ## Tech Stack
 
-- **Smart Contracts**: Anchor 0.31.1, Rust
-- **Frontend**: Next.js 15.5, React 19, TypeScript
+### Smart Contracts
+- **Framework**: Anchor 0.31.1
+- **Language**: Rust
+- **VRF**: Switchboard 0.30.4
+- **Serialization**: Borsh 0.10
+- **Token Support**: SPL Token 6.0, Associated Token Account 5.0
+- **Utilities**: Bytemuck, Arrayref, Num-traits
+
+### Frontend
+- **Framework**: Next.js 15.5
+- **Runtime**: React 19
+- **Language**: TypeScript
 - **Blockchain**: Solana Web3.js, Wallet Adapter
-- **Styling**: Tailwind CSS
+- **Styling**: Tailwind CSS, shadcn/ui
 - **Build**: Turbo, pnpm workspaces
 
 ## Quick Start

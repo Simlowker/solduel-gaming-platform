@@ -65,3 +65,60 @@ pub enum GameError {
     #[msg("Action not allowed in current round")]
     ActionNotAllowedInRound,
 }
+
+#[error_code]
+pub enum TreasuryError {
+    #[msg("Platform fees have already been distributed")]
+    FeesAlreadyDistributed,
+    
+    #[msg("Game is not completed")]
+    GameNotCompleted,
+    
+    #[msg("No winner set for this game")]
+    NoWinnerSet,
+    
+    #[msg("Invalid winner account")]
+    InvalidWinner,
+    
+    #[msg("Player not found in game")]
+    PlayerNotInGame,
+    
+    #[msg("No stake to refund")]
+    NoStakeToRefund,
+    
+    #[msg("Game is not cancelled")]
+    GameNotCancelled,
+}
+
+#[error_code]
+pub enum VrfError {
+    #[msg("No tickets sold for lottery")]
+    NoTicketsSold,
+    
+    #[msg("VRF result not yet available")]
+    VrfNotReady,
+    
+    #[msg("VRF already consumed for this game")]
+    VrfAlreadyConsumed,
+    
+    #[msg("VRF not enabled for this game")]
+    VrfNotEnabled,
+}
+
+#[error_code]
+pub enum TokenError {
+    #[msg("Invalid stake amount")]
+    InvalidStakeAmount,
+    
+    #[msg("Game is full")]
+    GameFull,
+    
+    #[msg("Insufficient token balance")]
+    InsufficientBalance,
+    
+    #[msg("Token mint mismatch")]
+    MintMismatch,
+    
+    #[msg("Token transfer failed")]
+    TransferFailed,
+}

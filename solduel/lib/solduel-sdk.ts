@@ -6,7 +6,7 @@ import * as crypto from 'crypto';
 
 // Program ID for the universal game contract (deployed on devnet)
 const UNIVERSAL_GAME_PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || 'BELsmsp7jdUSUJDfcsLXP8HSdJsaAtbSBSJ95gRUbTyg'
+  process.env.NEXT_PUBLIC_PROGRAM_ID || 'Cg8sF2yCkfStCqCViq676zXzRBqr7XRmyJtvLweNAh9x'
 );
 
 // Game Types
@@ -455,7 +455,7 @@ export class SolDuelSDK {
   async getGame(gameId: string): Promise<Game | null> {
     try {
       // Find the game by searching through all games
-      const games = await this.program.account.gameAccount.all();
+      const games = await this.program.account.gameAccountOptimized.all();
       const gameIdBN = new BN(gameId);
       
       const gameAccount = games.find(g => 
@@ -473,7 +473,7 @@ export class SolDuelSDK {
 
   async getActiveGames(): Promise<Game[]> {
     try {
-      const games = await this.program.account.gameAccount.all();
+      const games = await this.program.account.gameAccountOptimized.all();
       return games
         .map(g => this.parseGameAccount(g.account))
         .filter(g => g.state === GameState.Active || g.state === GameState.Waiting);
@@ -543,19 +543,45 @@ export class SolDuelSDK {
   }
 
   private parseGameAccount(account: any): Game {
+    // Unpack game type from packed byte (lower 4 bits)
+    const gameTypeBits = account.gameTypeAndState & 0x0F;
+    const gameType = gameTypeBits === 0 ? GameType.SimpleDuel : 
+                     gameTypeBits === 1 ? GameType.MultiRound : 
+                     GameType.Lottery;
+    
+    // Unpack game state from packed byte (upper 4 bits)
+    const stateBits = (account.gameTypeAndState >> 4) & 0x0F;
+    const state = stateBits === 0 ? GameState.Waiting :
+                  stateBits === 1 ? GameState.Active :
+                  stateBits === 2 ? GameState.Resolving :
+                  stateBits === 3 ? GameState.Completed :
+                  GameState.Cancelled;
+    
+    // Unpack rounds (lower 4 bits: current, upper 4 bits: max)
+    const currentRound = account.rounds & 0x0F;
+    const maxRounds = (account.rounds >> 4) & 0x0F;
+    
+    // Unpack timestamps (lower 32 bits: start_time, upper 32 bits: last_action_time)
+    const startTime = Number(account.timestamps & BigInt(0xFFFFFFFF));
+    const lastActionTime = Number((account.timestamps >> BigInt(32)) & BigInt(0xFFFFFFFF));
+    
+    // Filter active players and stakes based on player_count
+    const activePlayers = account.players.slice(0, account.playerCount).filter((p: PublicKey) => !p.equals(PublicKey.default()));
+    const activeStakes = account.stakes.slice(0, account.playerCount);
+    
     return {
       gameId: account.gameId.toString(),
-      gameType: Object.keys(account.gameType)[0] as GameType,
-      state: Object.keys(account.state)[0] as GameState,
+      gameType,
+      state,
       creator: account.creator,
-      players: account.players,
-      stakes: account.stakes.map((s: BN) => s.toNumber() / LAMPORTS_PER_SOL),
+      players: activePlayers,
+      stakes: activeStakes.map((s: BN) => s.toNumber() / LAMPORTS_PER_SOL),
       potTotal: account.potTotal.toNumber() / LAMPORTS_PER_SOL,
-      currentRound: account.currentRound,
-      maxRounds: account.maxRounds,
+      currentRound,
+      maxRounds,
       winner: account.winner,
-      startTime: new Date(account.startTime.toNumber() * 1000),
-      endTime: account.endTime ? new Date(account.endTime.toNumber() * 1000) : undefined,
+      startTime: new Date(startTime * 1000),
+      endTime: lastActionTime > 0 && state === GameState.Completed ? new Date(lastActionTime * 1000) : undefined,
       entryFee: account.entryFee.toNumber() / LAMPORTS_PER_SOL,
     };
   }

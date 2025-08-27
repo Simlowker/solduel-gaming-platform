@@ -1,7 +1,9 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::hash::hash;
-use crate::state::*;
+use crate::state::{GameAccountOptimized, GameType, GameState, GameMove};
+use crate::state::game_optimized::*;
 use crate::errors::GameError;
+use crate::events::*;
 
 pub fn commit_move(ctx: Context<CommitMove>, move_hash: [u8; 32]) -> Result<()> {
     let game = &mut ctx.accounts.game;
@@ -9,45 +11,59 @@ pub fn commit_move(ctx: Context<CommitMove>, move_hash: [u8; 32]) -> Result<()> 
     
     // Validate game state
     require!(
-        game.state == GameState::Active,
+        game.game_state() == GameState::Active,
         GameError::InvalidGameState
     );
     
     require!(
-        game.game_type == GameType::SimpleDuel,
+        game.game_type() == GameType::SimpleDuel,
         GameError::InvalidGameType
     );
     
     // Check if player is in the game
-    let player_index = game.players
-        .iter()
-        .position(|p| p == &ctx.accounts.player.key())
-        .ok_or(GameError::UnauthorizedPlayer)?;
+    let player_key = ctx.accounts.player.key();
+    let mut player_index = None;
+    for i in 0..game.player_count as usize {
+        if game.players[i] == player_key {
+            player_index = Some(i);
+            break;
+        }
+    }
+    let player_index = player_index.ok_or(GameError::UnauthorizedPlayer)?;
     
     // Check if move already submitted
-    if player_index < game.commit_hashes.len() {
-        require!(
-            game.commit_hashes[player_index] == [0; 32],
-            GameError::MoveAlreadySubmitted
-        );
-    }
+    require!(
+        game.commit_hashes[player_index] == [0; 32],
+        GameError::MoveAlreadySubmitted
+    );
     
     // Store commit hash
-    let players_count = game.players.len();
-    if player_index >= game.commit_hashes.len() {
-        game.commit_hashes.resize(players_count, [0; 32]);
-    }
     game.commit_hashes[player_index] = move_hash;
-    game.last_action_time = clock.unix_timestamp;
+    let start_time = game.start_time();
+    game.set_timestamps(start_time, clock.unix_timestamp as u32);
     
     // Check if all players have committed
-    let all_committed = game.commit_hashes
-        .iter()
-        .all(|h| h != &[0; 32]);
+    let mut all_committed = true;
+    for i in 0..game.player_count as usize {
+        if game.commit_hashes[i] == [0; 32] {
+            all_committed = false;
+            break;
+        }
+    }
     
     if all_committed {
-        game.state = GameState::Resolving;
+        let game_type = game.game_type();
+        game.set_type_and_state(game_type, GameState::Resolving);
     }
+    
+    // Emit event
+    emit!(MoveCommitted {
+        game_id: game.game_id,
+        player: player_key,
+        move_hash,
+        round: game.current_round(),
+        timestamp: clock.unix_timestamp,
+    });
     
     Ok(())
 }
@@ -62,15 +78,20 @@ pub fn reveal_move(
     
     // Validate game state
     require!(
-        game.state == GameState::Resolving,
+        game.game_state() == GameState::Resolving,
         GameError::InvalidGameState
     );
     
     // Get player index
-    let player_index = game.players
-        .iter()
-        .position(|p| p == &ctx.accounts.player.key())
-        .ok_or(GameError::UnauthorizedPlayer)?;
+    let player_key = ctx.accounts.player.key();
+    let mut player_index = None;
+    for i in 0..game.player_count as usize {
+        if game.players[i] == player_key {
+            player_index = Some(i);
+            break;
+        }
+    }
+    let player_index = player_index.ok_or(GameError::UnauthorizedPlayer)?;
     
     // Verify commitment
     let move_bytes = game_move.try_to_vec()?;
@@ -83,36 +104,72 @@ pub fn reveal_move(
         GameError::InvalidReveal
     );
     
-    // Store revealed move
-    let players_count = game.players.len();
-    if player_index >= game.reveals.len() {
-        game.reveals.resize(players_count, GameMove::None);
-    }
-    game.reveals[player_index] = game_move;
-    game.last_action_time = clock.unix_timestamp;
+    // Store revealed move (pack into single byte)
+    let move_byte = match game_move {
+        GameMove::None => 0,
+        GameMove::Rock => 1,
+        GameMove::Paper => 2,
+        GameMove::Scissors => 3,
+        GameMove::Heads => 4,
+        GameMove::Tails => 5,
+        GameMove::Number(n) => 6 + n,
+    };
+    game.reveals_packed[player_index] = move_byte;
+    let start_time = game.start_time();
+    game.set_timestamps(start_time, clock.unix_timestamp as u32);
     
     // Check if all players have revealed
-    let all_revealed = game.reveals
-        .iter()
-        .all(|m| !matches!(m, GameMove::None));
+    let mut all_revealed = true;
+    for i in 0..game.player_count as usize {
+        if game.reveals_packed[i] == 0 {
+            all_revealed = false;
+            break;
+        }
+    }
     
     if all_revealed {
         // Determine winner
         determine_winner(game)?;
-        game.state = GameState::Completed;
-        game.end_time = Some(clock.unix_timestamp);
+        let game_type = game.game_type();
+        game.set_type_and_state(game_type, GameState::Completed);
+        let start = game.start_time();
+        game.set_timestamps(start, clock.unix_timestamp as u32);
     }
+    
+    // Emit event
+    emit!(MoveRevealed {
+        game_id: game.game_id,
+        player: player_key,
+        game_move,
+        round: game.current_round(),
+        timestamp: clock.unix_timestamp,
+    });
     
     Ok(())
 }
 
-fn determine_winner(game: &mut GameAccount) -> Result<()> {
-    if game.players.len() != 2 || game.reveals.len() != 2 {
+// Helper function to unpack move from byte
+fn unpack_move(byte: u8) -> GameMove {
+    match byte {
+        0 => GameMove::None,
+        1 => GameMove::Rock,
+        2 => GameMove::Paper,
+        3 => GameMove::Scissors,
+        4 => GameMove::Heads,
+        5 => GameMove::Tails,
+        n if n >= 6 => GameMove::Number(n - 6),
+        _ => GameMove::None,
+    }
+}
+
+fn determine_winner(game: &mut GameAccountOptimized) -> Result<()> {
+    if game.player_count != 2 {
         return Err(GameError::InvalidGameState.into());
     }
     
-    let move1 = &game.reveals[0];
-    let move2 = &game.reveals[1];
+    // Unpack moves from bytes
+    let move1 = unpack_move(game.reveals_packed[0]);
+    let move2 = unpack_move(game.reveals_packed[1]);
     
     let winner_index = match (move1, move2) {
         (GameMove::Rock, GameMove::Scissors) |
@@ -136,7 +193,7 @@ fn determine_winner(game: &mut GameAccount) -> Result<()> {
 #[derive(Accounts)]
 pub struct CommitMove<'info> {
     #[account(mut)]
-    pub game: Account<'info, GameAccount>,
+    pub game: Account<'info, GameAccountOptimized>,
     
     pub player: Signer<'info>,
 }
@@ -144,7 +201,7 @@ pub struct CommitMove<'info> {
 #[derive(Accounts)]
 pub struct RevealMove<'info> {
     #[account(mut)]
-    pub game: Account<'info, GameAccount>,
+    pub game: Account<'info, GameAccountOptimized>,
     
     pub player: Signer<'info>,
 }

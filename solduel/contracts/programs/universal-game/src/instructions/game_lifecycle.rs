@@ -1,8 +1,10 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
-use crate::state::*;
+use crate::state::{ConfigurationAccount, PlayerAccount, GameAccountOptimized, GameType, GameState};
+use crate::state::game_optimized::*;
 use crate::constants::*;
 use crate::errors::GameError;
+use crate::events::*;
 
 pub fn create_game(
     ctx: Context<CreateGame>,
@@ -20,30 +22,34 @@ pub fn create_game(
         GameError::InvalidConfig
     );
     
-    // Initialize game
+    // Initialize game with optimized structure
     game.game_id = config.game_counter;
-    game.game_type = game_type;
-    game.state = GameState::Waiting;
+    game.set_type_and_state(game_type, GameState::Waiting);
     game.creator = ctx.accounts.player.key();
-    game.players = vec![ctx.accounts.player.key()];
-    game.stakes = vec![stake_amount];
+    
+    // Initialize player arrays
+    game.players[0] = ctx.accounts.player.key();
+    game.stakes[0] = stake_amount;
+    game.player_count = 1;
     game.pot_total = stake_amount;
-    game.current_round = 0;
-    game.max_rounds = match game_type {
+    
+    // Set rounds
+    let max_rounds = match game_type {
         GameType::SimpleDuel => 1,
         GameType::MultiRound => config.max_rounds,
         GameType::Lottery => 1,
     };
-    game.commit_hashes = vec![];
-    game.reveals = vec![];
-    game.action_history = vec![];
+    game.set_rounds(0, max_rounds);
+    
+    // Initialize other fields
+    game.action_count = 0;
     game.winner = None;
-    game.random_result = None;
-    game.start_time = clock.unix_timestamp;
-    game.end_time = None;
-    game.last_action_time = clock.unix_timestamp;
+    game.vrf_result = [0u8; 32];
+    game.set_timestamps(clock.unix_timestamp as u32, clock.unix_timestamp as u32);
     game.entry_fee = stake_amount;
-    game.reserved = [0; 64];
+    game.platform_fee_collected = 0;
+    game.treasury = config.treasury;
+    game.flags = 0;
     
     // Transfer stake to vault
     system_program::transfer(
@@ -61,6 +67,22 @@ pub fn create_game(
     let config = &mut ctx.accounts.config;
     config.game_counter += 1;
     
+    // Get default max players for game type
+    let max_default = match game_type {
+        GameType::SimpleDuel | GameType::MultiRound => 2,
+        GameType::Lottery => MAX_PLAYERS as u8,
+    };
+    
+    // Emit event
+    emit!(GameCreated {
+        game_id: game.game_id,
+        creator: ctx.accounts.player.key(),
+        game_type,
+        stake_amount,
+        max_players: max_players.unwrap_or(max_default),
+        timestamp: clock.unix_timestamp,
+    });
+    
     Ok(())
 }
 
@@ -70,32 +92,45 @@ pub fn join_game(ctx: Context<JoinGame>) -> Result<()> {
     
     // Check game state
     require!(
-        game.state == GameState::Waiting,
+        game.game_state() == GameState::Waiting,
         GameError::InvalidGameState
     );
     
     // Check if player already joined
+    let player_key = ctx.accounts.player.key();
+    let mut already_joined = false;
+    for i in 0..game.player_count as usize {
+        if game.players[i] == player_key {
+            already_joined = true;
+            break;
+        }
+    }
     require!(
-        !game.players.contains(&ctx.accounts.player.key()),
+        !already_joined,
         GameError::PlayerAlreadyJoined
     );
     
     // Check max players
-    let max = match game.game_type {
+    let max = match game.game_type() {
         GameType::SimpleDuel | GameType::MultiRound => 2,
-        GameType::Lottery => MAX_PLAYERS,
+        GameType::Lottery => MAX_PLAYERS as u8,
     };
     require!(
-        game.players.len() < max,
+        game.player_count < max,
         GameError::GameFull
     );
     
     // Add player
     let entry_fee = game.entry_fee;
-    game.players.push(ctx.accounts.player.key());
-    game.stakes.push(entry_fee);
+    let player_index = game.player_count as usize;
+    game.players[player_index] = player_key;
+    game.stakes[player_index] = entry_fee;
+    game.player_count += 1;
     game.pot_total += entry_fee;
-    game.last_action_time = clock.unix_timestamp;
+    
+    // Update timestamp
+    let start_time = game.start_time();
+    game.set_timestamps(start_time, clock.unix_timestamp as u32);
     
     // Transfer stake to vault
     system_program::transfer(
@@ -110,10 +145,21 @@ pub fn join_game(ctx: Context<JoinGame>) -> Result<()> {
     )?;
     
     // Start game if ready
-    if game.game_type != GameType::Lottery && game.players.len() == 2 {
-        game.state = GameState::Active;
-        game.current_round = 1;
+    if game.game_type() != GameType::Lottery && game.player_count == 2 {
+        let game_type = game.game_type();
+        game.set_type_and_state(game_type, GameState::Active);
+        let max_rounds = game.max_rounds();
+        game.set_rounds(1, max_rounds);
     }
+    
+    // Emit event
+    emit!(PlayerJoined {
+        game_id: game.game_id,
+        player: player_key,
+        stake_amount: entry_fee,
+        player_count: game.player_count,
+        timestamp: clock.unix_timestamp,
+    });
     
     Ok(())
 }
@@ -129,13 +175,23 @@ pub fn cancel_game(ctx: Context<CancelGame>) -> Result<()> {
     );
     
     require!(
-        game.state == GameState::Waiting,
+        game.game_state() == GameState::Waiting,
         GameError::InvalidGameState
     );
     
     // Mark as cancelled
-    game.state = GameState::Cancelled;
-    game.end_time = Some(clock.unix_timestamp);
+    let game_type = game.game_type();
+    game.set_type_and_state(game_type, GameState::Cancelled);
+    let start_time = game.start_time();
+    game.set_timestamps(start_time, clock.unix_timestamp as u32);
+    
+    // Emit event
+    emit!(GameCancelled {
+        game_id: game.game_id,
+        reason: crate::events::CancelReason::CreatorCancelled,
+        refund_amount: game.pot_total,
+        timestamp: clock.unix_timestamp,
+    });
     
     // Refund will be handled separately
     
@@ -148,7 +204,8 @@ pub fn force_finish(ctx: Context<ForceFinish>) -> Result<()> {
     let clock = Clock::get()?;
     
     // Check timeout
-    let elapsed = clock.unix_timestamp - game.last_action_time;
+    let last_action = game.last_action_time() as i64;
+    let elapsed = clock.unix_timestamp - last_action;
     require!(
         elapsed > config.timeout as i64,
         GameError::InvalidGameState
@@ -157,8 +214,18 @@ pub fn force_finish(ctx: Context<ForceFinish>) -> Result<()> {
     // Determine winner based on last active player
     // (Implementation depends on game type)
     
-    game.state = GameState::Completed;
-    game.end_time = Some(clock.unix_timestamp);
+    let game_type = game.game_type();
+    game.set_type_and_state(game_type, GameState::Completed);
+    let start_time = game.start_time();
+    game.set_timestamps(start_time, clock.unix_timestamp as u32);
+    
+    // Emit event
+    emit!(PlayerTimedOut {
+        game_id: game.game_id,
+        player: game.creator, // Placeholder - should determine actual player
+        penalty_amount: 0,
+        timestamp: clock.unix_timestamp,
+    });
     
     Ok(())
 }
@@ -168,7 +235,7 @@ pub struct CreateGame<'info> {
     #[account(
         init,
         payer = player,
-        space = GameAccount::LEN,
+        space = GameAccountOptimized::LEN,
         seeds = [
             GAME_SEED,
             player.key().as_ref(),
@@ -176,7 +243,7 @@ pub struct CreateGame<'info> {
         ],
         bump
     )]
-    pub game: Account<'info, GameAccount>,
+    pub game: Account<'info, GameAccountOptimized>,
     
     #[account(
         mut,
@@ -205,7 +272,7 @@ pub struct CreateGame<'info> {
 #[derive(Accounts)]
 pub struct JoinGame<'info> {
     #[account(mut)]
-    pub game: Account<'info, GameAccount>,
+    pub game: Account<'info, GameAccountOptimized>,
     
     /// CHECK: Vault account for holding stakes
     #[account(mut)]
@@ -220,7 +287,7 @@ pub struct JoinGame<'info> {
 #[derive(Accounts)]
 pub struct CancelGame<'info> {
     #[account(mut)]
-    pub game: Account<'info, GameAccount>,
+    pub game: Account<'info, GameAccountOptimized>,
     
     pub player: Signer<'info>,
 }
@@ -228,7 +295,7 @@ pub struct CancelGame<'info> {
 #[derive(Accounts)]
 pub struct ForceFinish<'info> {
     #[account(mut)]
-    pub game: Account<'info, GameAccount>,
+    pub game: Account<'info, GameAccountOptimized>,
     
     #[account(seeds = [CONFIG_SEED], bump)]
     pub config: Account<'info, ConfigurationAccount>,

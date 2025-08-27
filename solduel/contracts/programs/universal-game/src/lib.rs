@@ -2,13 +2,17 @@ use anchor_lang::prelude::*;
 
 pub mod constants;
 pub mod errors;
+pub mod events;
 pub mod instructions;
 pub mod state;
+pub mod token;
+pub mod vrf;
 
 use instructions::*;
 use state::*;
+use events::*;
 
-declare_id!("EH2W2Yxww1jLAySWFo2GjLJWeV7UQcumQSuuZkfAyUsn");
+declare_id!("Cg8sF2yCkfStCqCViq676zXzRBqr7XRmyJtvLweNAh9x");
 
 #[program]
 pub mod universal_game {

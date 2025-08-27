@@ -1,11 +1,12 @@
 [toolchain]
+anchor_version = "0.30.1"
 
 [features]
 resolution = true
 skip-lint = false
 
 [programs.devnet]
-universal_game = "BELsmsp7jdUSUJDfcsLXP8HSdJsaAtbSBSJ95gRUbTyg"
+universal_game = "Cg8sF2yCkfStCqCViq676zXzRBqr7XRmyJtvLweNAh9x"
 
 [registry]
 url = "https://api.apr.dev"

@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
-use crate::state::*;
+use crate::state::{GameAccountOptimized, GameType, GameState, BetAction};
 use crate::errors::GameError;
 
 pub fn place_bet(ctx: Context<PlaceBet>, action: BetAction) -> Result<()> {
@@ -9,17 +9,17 @@ pub fn place_bet(ctx: Context<PlaceBet>, action: BetAction) -> Result<()> {
     
     // Validate game state
     require!(
-        game.state == GameState::Active,
+        game.game_state() == GameState::Active,
         GameError::InvalidGameState
     );
     
     require!(
-        game.game_type == GameType::MultiRound,
+        game.game_type() == GameType::MultiRound,
         GameError::InvalidGameType
     );
     
     // Get player index
-    let player_index = game.players
+    let player_index = game.players[..game.player_count as usize]
         .iter()
         .position(|p| p == &ctx.accounts.player.key())
         .ok_or(GameError::UnauthorizedPlayer)?;
@@ -28,7 +28,11 @@ pub fn place_bet(ctx: Context<PlaceBet>, action: BetAction) -> Result<()> {
     match action {
         BetAction::Check => {
             // Check is allowed if no bet is pending
-            game.action_history.push(action);
+            let action_count = game.action_count;
+            if action_count < 50 {
+                game.action_history_packed[action_count as usize] = 0; // Check = 0
+                game.action_count += 1;
+            }
         },
         BetAction::Call => {
             // Match the current bet
@@ -53,7 +57,11 @@ pub fn place_bet(ctx: Context<PlaceBet>, action: BetAction) -> Result<()> {
                 game.pot_total += call_amount;
             }
             
-            game.action_history.push(action);
+            let action_count = game.action_count;
+            if action_count < 50 {
+                game.action_history_packed[action_count as usize] = 1; // Call = 1
+                game.action_count += 1;
+            }
         },
         BetAction::Raise(amount) => {
             // Raise the bet
@@ -76,54 +84,73 @@ pub fn place_bet(ctx: Context<PlaceBet>, action: BetAction) -> Result<()> {
             
             game.stakes[player_index] += raise_amount;
             game.pot_total += raise_amount;
-            game.action_history.push(action);
+            let action_count = game.action_count;
+            if action_count < 50 {
+                game.action_history_packed[action_count as usize] = 2; // Raise = 2
+                game.action_count += 1;
+            }
         },
         BetAction::Fold => {
             // Folding forfeits the game
             require!(
-                game.current_round < game.max_rounds,
+                game.current_round() < game.max_rounds(),
                 GameError::CannotFoldFinalRound
             );
             
             // Other player wins
             let winner_index = if player_index == 0 { 1 } else { 0 };
             game.winner = Some(game.players[winner_index]);
-            game.state = GameState::Completed;
-            game.end_time = Some(clock.unix_timestamp);
-            game.action_history.push(action);
+            let game_type = game.game_type();
+            game.set_type_and_state(game_type, GameState::Completed);
+            let current_time = clock.unix_timestamp as u32;
+            let start_time = game.start_time();
+    game.set_timestamps(start_time, current_time);
+            let action_count = game.action_count;
+            if action_count < 50 {
+                game.action_history_packed[action_count as usize] = 3; // Fold = 3
+                game.action_count += 1;
+            }
         },
     }
     
-    game.last_action_time = clock.unix_timestamp;
+    let current_time = clock.unix_timestamp as u32;
+    let start_time = game.start_time();
+    game.set_timestamps(start_time, current_time);
     
     // Check if round is complete
     if should_advance_round(game) {
-        game.current_round += 1;
+        let current_round = game.current_round();
+        let max_rounds = game.max_rounds();
+        game.set_rounds(current_round + 1, max_rounds);
         
-        if game.current_round > game.max_rounds {
+        if current_round + 1 > max_rounds {
             // Game complete - determine winner based on random reveal
-            game.state = GameState::Resolving;
+            let game_type = game.game_type();
+            game.set_type_and_state(game_type, GameState::Resolving);
         }
     }
     
     Ok(())
 }
 
-fn calculate_current_bet(game: &GameAccount) -> Result<u64> {
+fn calculate_current_bet(game: &GameAccountOptimized) -> Result<u64> {
     // Find the highest stake among active players
-    Ok(game.stakes.iter().max().copied().unwrap_or(0))
+    Ok(game.stakes[..game.player_count as usize].iter().max().copied().unwrap_or(0))
 }
 
-fn should_advance_round(game: &GameAccount) -> bool {
+fn should_advance_round(game: &GameAccountOptimized) -> bool {
     // Round advances when all players have acted equally
     // This is simplified - real implementation would track betting rounds properly
-    game.action_history.len() % game.players.len() == 0
+    if game.player_count == 0 {
+        return false;
+    }
+    game.action_count % game.player_count == 0
 }
 
 #[derive(Accounts)]
 pub struct PlaceBet<'info> {
     #[account(mut)]
-    pub game: Account<'info, GameAccount>,
+    pub game: Account<'info, GameAccountOptimized>,
     
     /// CHECK: Vault account for holding stakes
     #[account(mut)]
