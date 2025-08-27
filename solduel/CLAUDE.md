@@ -4,37 +4,31 @@ This file provides guidance to Claude (claude.ai) when working with this reposit
 
 ## Project Structure
 
-SolDuel - Universal decentralized gaming platform on Solana with a single smart contract supporting all PvP game modes with verifiable fairness.
+SolDuel - Universal decentralized gaming platform on Solana supporting multiple PvP game modes with verifiable fairness.
 
 ```
-solduel/
-├── programs/
-│   └── universal-game/          # Universal Anchor smart contract
-│       ├── Anchor.toml          # Anchor configuration
-│       ├── Cargo.toml           # Rust dependencies
-│       └── src/
-│           ├── lib.rs           # Main program entry point
-│           ├── instructions/    # Modular instruction handlers
-│           │   ├── admin.rs     # Admin configuration
-│           │   ├── game_lifecycle.rs  # Create/join/cancel games
-│           │   ├── simple_duel.rs      # Rock-paper-scissors, coin flip
-│           │   ├── multi_round.rs      # Poker-style betting
-│           │   └── lottery.rs          # Pool-based lottery
-│           ├── state/           # Account structures
-│           │   ├── config.rs    # Global configuration
-│           │   ├── game.rs      # Game state
-│           │   └── player.rs    # Player statistics
-│           ├── errors.rs        # Error codes
-│           └── constants.rs     # Constants and limits
-├── app/                         # Next.js frontend
-│   ├── src/
-│   │   ├── app/                # Next.js app router
-│   │   ├── hooks/              # Custom React hooks
-│   │   └── lib/                
-│   │       └── solduel-sdk.ts  # TypeScript SDK for contract interaction
-│   └── idl/
-│       └── universal_game.json # Generated IDL from Anchor
-└── tests/                       # Integration tests
+solduel/                     # Root = Next.js app (for easy Vercel deployment)
+├── app/                     # Next.js app router pages
+├── components/              # React components
+│   ├── ui/                  # shadcn/ui components
+│   └── games/               # Game-specific components
+├── hooks/                   # Custom React hooks
+├── lib/                     # Utilities and SDK
+│   └── solduel-sdk.ts       # TypeScript SDK for smart contract interaction
+├── idl/                     # Anchor IDL files
+│   └── universal_game.json  # Generated from smart contract
+├── public/                  # Static assets
+├── contracts/               # Anchor smart contracts
+│   ├── programs/
+│   │   └── universal-game/  # Main program
+│   ├── target/              # Build artifacts
+│   ├── Anchor.toml          # Anchor configuration
+│   └── Cargo.toml           # Rust dependencies
+├── package.json             # Next.js dependencies
+├── next.config.mjs          # Next.js configuration
+├── tsconfig.json            # TypeScript configuration
+├── tailwind.config.ts       # Tailwind CSS configuration
+└── vercel.json              # Vercel deployment configuration
 ```
 
 ## Deployed Program (Devnet)
@@ -43,136 +37,134 @@ solduel/
 
 ## Smart Contract Architecture
 
-### Single Universal Contract
-One smart contract handles all game types through a modular instruction system:
-
-1. **Simple Duels**: Rock-paper-scissors, coin flip with commit-reveal
-2. **Multi-round Games**: Poker-style betting with check/call/raise/fold
-3. **Lottery**: Weighted ticket system with proportional odds
+### Game Modes Supported
+1. **Simple Duel**: Rock-paper-scissors with commit-reveal mechanism
+2. **Multi-round Duel**: Poker-style betting with check/call/raise/fold actions  
+3. **Lottery**: Weighted ticket system with proportional winning odds
 
 ### Account Structures
 
 #### ConfigurationAccount (PDA: seeds = ["config"])
 Global settings managed by admin:
-- `admin`: Administrator address
+- `admin`: Pubkey - Administrator address
 - `treasury`: Platform fee collection address
-- `min_stake` / `max_stake`: Betting limits
-- `max_rounds`: Maximum rounds for multi-round games
-- `fold_penalty`: Percentage penalty for folding
-- `randomness_method`: 0=commit-reveal, 1=VRF, 2=VDF
-- `platform_fee`: Platform commission percentage (0-100)
-- `timeout`: Seconds before games can be force-finished
-- `ticket_conversion`: Lottery tickets per stake unit
-- `game_counter`: Unique game ID generator
+- `min_stake` / `max_stake`: u64 - Stake limits
+- `max_rounds`: u8 - Max rounds for multi-round duels
+- `fold_penalty`: u8 - Percentage (0-100) penalty for folding
+- `randomness_method`: u8 - 0=commit-reveal, 1=VRF, 2=VDF
+- `platform_fee`: u8 - Platform commission percentage  
+- `timeout`: u64 - Seconds before inactive games can be force-finished
+- `ticket_conversion`: u64 - Tickets per stake unit for lottery
+- `game_counter`: u64 - Unique game ID generator
 
 #### GameAccount (PDA: seeds = ["game", creator, game_id])
-Per-game state tracking:
-- `game_id`: Unique identifier
-- `game_type`: SimpleDuel, MultiRound, or Lottery
-- `state`: Waiting, Active, Resolving, Completed, Cancelled
-- `players`: List of participants (max 2 for duels, 100 for lottery)
-- `stakes`: Individual player stakes
-- `pot_total`: Total pot in escrow
-- `current_round` / `max_rounds`: Round tracking
-- `commit_hashes`: Hashed moves for commit-reveal
-- `reveals`: Revealed player moves
-- `action_history`: Betting action sequence
-- `winner`: Winner address when determined
-- `start_time` / `end_time`: Timestamps
+Per-game state:
+- `game_id`: u64 - Unique identifier
+- `game_type`: u8 - 0=simple duel, 1=multi-round, 2=lottery
+- `state`: u8 - 0=waiting, 1=active, 2=resolving, 3=completed, 4=cancelled
+- `players`: Vec<Pubkey> - Player addresses
+- `stakes`: Vec<u64> - Player stakes
+- `pot_total`: u64 - Total pot in escrow
+- `current_round`: u8 - Current round number
+- `commit_hashes`: Vec<[u8; 32]> - Move commitments
+- `reveals`: Vec<(u8, [u8; 32])> - Revealed choices
+- `action_history`: Vec<u8> - Betting actions
+- `winner`: Option<Pubkey> - Winner address when resolved
+- `start_time`: i64 - Game creation timestamp
+- `end_time`: Option<i64> - Resolution timestamp
 
 #### PlayerAccount (PDA: seeds = ["player", owner])
-Optional player statistics:
-- `owner`: Player's wallet address
-- `games_played`, `wins`, `losses`, `draws`: Game history
-- `total_staked`, `total_won`: Financial history
-- `win_streak`, `best_streak`: Performance metrics
+Player statistics:
+- `owner`: Pubkey
+- `games_played` / `wins` / `losses`: u32
+- `total_staked` / `total_won`: u64
 
-### Key Instructions
-
-#### Admin
-- `initialize_config()` - One-time setup
-- `update_config()` - Modify game parameters
+### Instructions
 
 #### Game Lifecycle
-- `create_game(type, stake, max_players)` - Start any game type
-- `join_game()` - Enter existing game
-- `cancel_game()` - Creator cancels waiting game
-- `force_finish()` - Apply timeout penalty
+- `create_game(game_type, params)` - Initialize new game
+- `join_game(amount)` / `enter_lottery(amount)` - Enter with stake
+- `cancel_game()` - Cancel and refund if conditions not met
 
-#### Gameplay
-- `commit_move(hash)` - Submit hashed choice
-- `reveal_move(move, nonce)` - Reveal committed choice
-- `place_bet(action, amount)` - Betting for multi-round
-- `enter_lottery(tickets)` - Buy lottery tickets
-- `draw_lottery()` - Trigger lottery drawing
+#### Gameplay Actions
+- `commit_move(hash)` - Submit hashed choice (duels)
+- `reveal_move(choice, secret)` - Reveal committed choice
+- `place_bet(action, amount)` - Check/call/raise/fold (multi-round)
 
 #### Resolution
-- `resolve_game()` - Compute final winner
-- `claim_winnings()` - Withdraw won funds
+- `resolve_game()` / `draw_lottery()` - Determine winner and distribute
+- `force_finish()` - Apply timeout penalty after inactivity
+- `claim_winnings()` - Claim winnings if not auto-distributed
 
-### Security Features
+### Security & Constraints
 
-- All accounts use PDAs for program ownership
-- Fixed-size allocations with `#[max_len]` constraints
-- Escrow mechanism for safe fund handling
-- Commit-reveal prevents cheating in duels
+- All Vec fields use fixed size allocation
+- PDAs ensure unique accounts and program ownership
+- Escrow through program-owned vaults
+- Admin-only instructions for configuration updates
+- Signature verification for all state modifications
 - Timeout mechanism prevents indefinite locks
-- Admin-only configuration updates
-
-## Frontend SDK
-
-TypeScript SDK (`app/lib/solduel-sdk.ts`) provides:
-- Type-safe contract interactions
-- Automatic PDA derivation
-- Game state management
-- Player statistics tracking
-- Move commitment/reveal helpers
 
 ## Tech Stack
 
-- **Smart Contract**: Anchor 0.30.1, Rust
-- **Frontend**: Next.js 15.5, React 19, TypeScript
-- **Blockchain**: Solana Web3.js 1.95, Wallet Adapter
-- **Styling**: Tailwind CSS
-- **Build**: pnpm
+- **Smart Contracts**: Anchor 0.31.1, Rust
+- **Frontend**: Next.js 15.2, React 19, TypeScript
+- **Blockchain**: Solana Web3.js, Wallet Adapter
+- **Styling**: Tailwind CSS, shadcn/ui
+- **Animations**: Framer Motion
 
 ## Quick Start
 
+### Frontend (Next.js)
 ```bash
-# Build and deploy contract
-cd programs/universal-game
-anchor build
-anchor deploy
+# Install dependencies
+npm install
 
-# Run frontend
-cd app
-pnpm install
-pnpm dev  # http://localhost:3000
+# Run development server
+npm run dev  # Runs on http://localhost:3000
+
+# Build for production
+npm run build
 ```
 
-## Development Workflow
+### Smart Contracts
+```bash
+# Navigate to contracts
+cd contracts
 
-1. **Contract Development**:
-   ```bash
-   cd programs/universal-game
-   anchor build
-   anchor test
-   anchor deploy --provider.cluster devnet
-   ```
+# Build contracts
+anchor build
 
-2. **Generate IDL**:
-   ```bash
-   anchor build
-   cp target/idl/universal_game.json app/idl/
-   ```
+# Deploy to devnet
+anchor deploy --provider.cluster devnet
 
-3. **Frontend Integration**:
-   - Import SDK: `import SolDuelSDK from '@/lib/solduel-sdk'`
-   - Initialize with wallet connection
-   - Use typed methods for all contract interactions
+# Run tests
+anchor test
+```
 
-## Testing
+## Environment Variables
 
-- Unit tests in `programs/universal-game/tests/`
-- Integration tests use Anchor's testing framework
-- Frontend testing with Jest/React Testing Library
+Create `.env.local` file:
+```env
+NEXT_PUBLIC_PROGRAM_ID=BELsmsp7jdUSUJDfcsLXP8HSdJsaAtbSBSJ95gRUbTyg
+NEXT_PUBLIC_SOLANA_NETWORK=devnet
+NEXT_PUBLIC_RPC_URL=https://api.devnet.solana.com
+```
+
+## Development Notes
+
+- **Configuration**: Click "Initialize Config" button on homepage (admin only, do once)
+- **Wallet**: Configure wallet for devnet at ~/.config/solana/devnet-keypair.json
+- **Airdrop**: Use `solana airdrop 2 --url devnet` to get test SOL
+- **IDL**: After contract changes, copy IDL: `cp contracts/target/idl/universal_game.json idl/`
+- **Deployment**: Push to GitHub, Vercel auto-deploys from master branch
+
+## Testing Multiplayer
+
+1. Deploy to Vercel (automatic from GitHub)
+2. Share link with other players
+3. All players need:
+   - Phantom/Solflare wallet on Devnet
+   - Test SOL from faucet
+   - Click "Initialize Config" once (admin only)
+4. Create and join games!
