@@ -1,6 +1,4 @@
 {
-  "buildCommand": "cd solduel && pnpm build",
-  "outputDirectory": "solduel/.next",
-  "installCommand": "cd solduel && pnpm install",
+  "rootDirectory": "solduel",
   "framework": "nextjs"
 }
